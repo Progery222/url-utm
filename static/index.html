@@ -7,7 +7,7 @@
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-100 min-h-screen">
-  <div class="max-w-5xl mx-auto px-4 py-10">
+  <div class="max-w-6xl mx-auto px-4 py-10">
     <h1 class="text-3xl font-bold text-gray-800 mb-8 text-center">URL Tracker</h1>
 
     <div class="bg-white rounded-xl shadow-md p-6 mb-8">
@@ -41,16 +41,49 @@
               <th class="px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Название</th>
               <th class="px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Короткая ссылка</th>
               <th class="px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Целевая ссылка</th>
-              <th class="px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Клики</th>
+              <th class="px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Всего кликов</th>
+              <th class="px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Уникальных</th>
               <th class="px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider text-right">Действия</th>
             </tr>
           </thead>
           <tbody id="linksTable" class="divide-y divide-gray-100">
             <tr>
-              <td colspan="5" class="px-6 py-4 text-gray-400 text-center">Загрузка...</td>
+              <td colspan="6" class="px-6 py-4 text-gray-400 text-center">Загрузка...</td>
             </tr>
           </tbody>
         </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stats Modal -->
+  <div id="statsModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+    <div class="bg-white rounded-xl shadow-xl max-w-md w-full mx-4 p-6">
+      <div class="flex justify-between items-center mb-4">
+        <h3 class="text-lg font-bold text-gray-800">Статистика</h3>
+        <button onclick="closeStats()" class="text-gray-400 hover:text-gray-600">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      <div id="statsContent" class="space-y-4">
+        <div class="flex justify-between border-b pb-2">
+          <span class="text-gray-600">Всего кликов</span>
+          <span id="statTotal" class="font-bold text-gray-800">0</span>
+        </div>
+        <div class="flex justify-between border-b pb-2">
+          <span class="text-gray-600">Уникальных посетителей</span>
+          <span id="statUnique" class="font-bold text-gray-800">0</span>
+        </div>
+        <div>
+          <h4 class="text-sm font-semibold text-gray-700 mb-2">Устройства</h4>
+          <div id="statDevices" class="space-y-1"></div>
+        </div>
+        <div>
+          <h4 class="text-sm font-semibold text-gray-700 mb-2">Операционные системы</h4>
+          <div id="statOs" class="space-y-1"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -63,7 +96,7 @@
       const links = await res.json();
       const tbody = document.getElementById('linksTable');
       if (!links.length) {
-        tbody.innerHTML = `<tr><td colspan="5" class="px-6 py-4 text-gray-400 text-center">Пока нет ссылок</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" class="px-6 py-4 text-gray-400 text-center">Пока нет ссылок</td></tr>`;
         return;
       }
       tbody.innerHTML = links.map(link => {
@@ -76,8 +109,16 @@
           <td class="px-6 py-4 text-sm text-gray-600 truncate max-w-xs" title="${escapeHtml(link.target_url)}">
             <a href="${escapeHtml(link.target_url)}" target="_blank" class="hover:underline">${escapeHtml(link.target_url)}</a>
           </td>
-          <td class="px-6 py-4 text-sm text-gray-800 font-semibold">${link.clicks}</td>
+          <td class="px-6 py-4 text-sm text-gray-800 font-semibold">${link.total_clicks}</td>
+          <td class="px-6 py-4 text-sm text-gray-800 font-semibold">${link.unique_visitors}</td>
           <td class="px-6 py-4 text-sm text-right">
+            <button onclick="showStats('${link.slug}')" title="Статистика"
+              class="inline-flex items-center justify-center w-8 h-8 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-full transition mr-1"
+              aria-label="Статистика">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 0 1 3 19.875v-6.75ZM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V8.625ZM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 0 1-1.125-1.125V4.125Z" />
+              </svg>
+            </button>
             <button onclick="resetClicks('${link.slug}')" title="Сбросить клики"
               class="inline-flex items-center justify-center w-8 h-8 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-full transition mr-1"
               aria-label="Сбросить клики">
@@ -95,6 +136,48 @@
           </td>
         </tr>`;
       }).join('');
+    }
+
+    async function showStats(slug) {
+      try {
+        const res = await fetch(`${API_URL}/api/links/${slug}/stats`);
+        if (!res.ok) throw new Error('Ошибка загрузки');
+        const data = await res.json();
+        document.getElementById('statTotal').textContent = data.total_clicks;
+        document.getElementById('statUnique').textContent = data.unique_visitors;
+
+        const devicesDiv = document.getElementById('statDevices');
+        const deviceEntries = Object.entries(data.devices).sort((a, b) => b[1] - a[1]);
+        devicesDiv.innerHTML = deviceEntries.length
+          ? deviceEntries.map(([name, count]) => `
+              <div class="flex justify-between text-sm">
+                <span class="text-gray-600">${escapeHtml(name)}</span>
+                <span class="font-medium text-gray-800">${count}</span>
+              </div>`).join('')
+          : '<div class="text-sm text-gray-400">Нет данных</div>';
+
+        const osDiv = document.getElementById('statOs');
+        const osEntries = Object.entries(data.os).sort((a, b) => b[1] - a[1]);
+        osDiv.innerHTML = osEntries.length
+          ? osEntries.map(([name, count]) => `
+              <div class="flex justify-between text-sm">
+                <span class="text-gray-600">${escapeHtml(name)}</span>
+                <span class="font-medium text-gray-800">${count}</span>
+              </div>`).join('')
+          : '<div class="text-sm text-gray-400">Нет данных</div>';
+
+        const modal = document.getElementById('statsModal');
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+      } catch (err) {
+        alert('Не удалось загрузить статистику');
+      }
+    }
+
+    function closeStats() {
+      const modal = document.getElementById('statsModal');
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
     }
 
     async function resetClicks(slug) {
@@ -148,6 +231,10 @@
         msg.textContent = 'Не удалось создать ссылку';
         msg.classList.remove('hidden');
       }
+    });
+
+    document.getElementById('statsModal').addEventListener('click', (e) => {
+      if (e.target === document.getElementById('statsModal')) closeStats();
     });
 
     loadLinks();
