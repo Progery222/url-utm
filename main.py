@@ -48,7 +48,6 @@ app.add_middleware(
 
 class CreateLinkRequest(BaseModel):
     label: str
-    params: Optional[str] = None
 
 
 class LinkResponse(BaseModel):
@@ -72,13 +71,9 @@ def create_link(payload: CreateLinkRequest):
     db = SessionLocal()
     try:
         slug = str(uuid.uuid4())[:8]
-        target_url = DEFAULT_TARGET_URL
-        if payload.params:
-            separator = "&" if "?" in DEFAULT_TARGET_URL else "?"
-            target_url = f"{DEFAULT_TARGET_URL}{separator}{payload.params}"
         link = Link(
             slug=slug,
-            target_url=target_url,
+            target_url=DEFAULT_TARGET_URL,
             label=payload.label,
         )
         db.add(link)
