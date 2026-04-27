@@ -108,6 +108,20 @@ def reset_clicks(slug: str):
         db.close()
 
 
+@app.delete("/api/links/{slug}")
+def delete_link(slug: str):
+    db = SessionLocal()
+    try:
+        link = db.query(Link).filter(Link.slug == slug).first()
+        if not link:
+            raise HTTPException(status_code=404, detail="Link not found")
+        db.delete(link)
+        db.commit()
+        return {"ok": True}
+    finally:
+        db.close()
+
+
 @app.get("/{slug}")
 def redirect(slug: str):
     db = SessionLocal()
