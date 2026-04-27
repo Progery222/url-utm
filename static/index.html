@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>URL Tracker</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+  <div class="max-w-5xl mx-auto px-4 py-10">
+    <h1 class="text-3xl font-bold text-gray-800 mb-8 text-center">URL Tracker</h1>
+
+    <div class="bg-white rounded-xl shadow-md p-6 mb-8">
+      <h2 class="text-lg font-semibold text-gray-700 mb-4">Создать ссылку</h2>
+      <form id="createForm" class="flex flex-col gap-4 md:flex-row md:items-end">
+        <div class="flex-1">
+          <label class="block text-sm font-medium text-gray-600 mb-1">Целевая ссылка</label>
+          <input type="url" id="targetUrl" required placeholder="https://example.com"
+            class="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+        <div class="flex-1">
+          <label class="block text-sm font-medium text-gray-600 mb-1">Название / Метка</label>
+          <input type="text" id="label" required placeholder="Telegram канал"
+            class="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+        <button type="submit"
+          class="bg-blue-600 hover:bg-blue-700 text-white font-medium px-6 py-2 rounded-lg transition">
+          Создать
+        </button>
+      </form>
+      <p id="message" class="mt-4 text-sm hidden"></p>
+    </div>
+
+    <div class="bg-white rounded-xl shadow-md overflow-hidden">
+      <div class="px-6 py-4 border-b border-gray-200">
+        <h2 class="text-lg font-semibold text-gray-700">Все ссылки</h2>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-left border-collapse">
+          <thead class="bg-gray-50">
+            <tr>
+              <th class="px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Название</th>
+              <th class="px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Короткая ссылка</th>
+              <th class="px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Целевая ссылка</th>
+              <th class="px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Клики</th>
+            </tr>
+          </thead>
+          <tbody id="linksTable" class="divide-y divide-gray-100">
+            <tr>
+              <td colspan="4" class="px-6 py-4 text-gray-400 text-center">Загрузка...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_URL = '';
+
+    async function loadLinks() {
+      const res = await fetch(`${API_URL}/api/links`);
+      const links = await res.json();
+      const tbody = document.getElementById('linksTable');
+      if (!links.length) {
+        tbody.innerHTML = `<tr><td colspan="4" class="px-6 py-4 text-gray-400 text-center">Пока нет ссылок</td></tr>`;
+        return;
+      }
+      tbody.innerHTML = links.map(link => {
+        const shortUrl = `${window.location.origin}/${link.slug}`;
+        return `<tr class="hover:bg-gray-50">
+          <td class="px-6 py-4 text-sm text-gray-800 font-medium">${escapeHtml(link.label)}</td>
+          <td class="px-6 py-4 text-sm">
+            <a href="${shortUrl}" target="_blank" class="text-blue-600 hover:underline">${shortUrl}</a>
+          </td>
+          <td class="px-6 py-4 text-sm text-gray-600 truncate max-w-xs" title="${escapeHtml(link.target_url)}">
+            <a href="${escapeHtml(link.target_url)}" target="_blank" class="hover:underline">${escapeHtml(link.target_url)}</a>
+          </td>
+          <td class="px-6 py-4 text-sm text-gray-800 font-semibold">${link.clicks}</td>
+        </tr>`;
+      }).join('');
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    document.getElementById('createForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const targetUrl = document.getElementById('targetUrl').value;
+      const label = document.getElementById('label').value;
+      const msg = document.getElementById('message');
+      try {
+        const res = await fetch(`${API_URL}/api/links`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ target_url: targetUrl, label })
+        });
+        if (!res.ok) throw new Error('Ошибка создания');
+        const data = await res.json();
+        const shortUrl = `${window.location.origin}/${data.slug}`;
+        msg.className = 'mt-4 text-sm text-green-700';
+        msg.textContent = `Ссылка создана: ${shortUrl}`;
+        msg.classList.remove('hidden');
+        document.getElementById('createForm').reset();
+        loadLinks();
+      } catch (err) {
+        msg.className = 'mt-4 text-sm text-red-600';
+        msg.textContent = 'Не удалось создать ссылку';
+        msg.classList.remove('hidden');
+      }
+    });
+
+    loadLinks();
+  </script>
+</body>
+</html>
