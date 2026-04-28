@@ -11,6 +11,18 @@
     <h1 class="text-3xl font-bold text-gray-800 mb-8 text-center">URL Tracker</h1>
 
     <div class="bg-white rounded-xl shadow-md p-6 mb-8">
+      <h2 class="text-lg font-semibold text-gray-700 mb-4">API-ключ (если задан на сервере)</h2>
+      <div class="flex flex-col gap-2 md:flex-row md:items-end mb-6">
+        <div class="flex-1">
+          <label class="block text-sm font-medium text-gray-600 mb-1">X-API-Key</label>
+          <input type="password" id="apiKeyInput" placeholder="Сохраняется в sessionStorage"
+            class="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-sm">
+        </div>
+        <button type="button" onclick="saveApiKey()"
+          class="bg-gray-700 hover:bg-gray-800 text-white font-medium px-6 py-2 rounded-lg transition">
+          Сохранить
+        </button>
+      </div>
       <h2 class="text-lg font-semibold text-gray-700 mb-4">Создать ссылку</h2>
       <div class="mb-4 p-3 bg-gray-50 rounded-lg">
         <span class="text-sm text-gray-500">Базовый URL:</span>
@@ -58,7 +70,7 @@
 
   <!-- Stats Modal -->
   <div id="statsModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
-    <div class="bg-white rounded-xl shadow-xl max-w-md w-full mx-4 p-6">
+    <div class="bg-white rounded-xl shadow-xl max-w-5xl w-full mx-4 p-6 max-h-[90vh] overflow-y-auto">
       <div class="flex justify-between items-center mb-4">
         <h3 class="text-lg font-bold text-gray-800">Статистика</h3>
         <button onclick="closeStats()" class="text-gray-400 hover:text-gray-600">
@@ -76,6 +88,14 @@
           <span class="text-gray-600">Уникальных посетителей</span>
           <span id="statUnique" class="font-bold text-gray-800">0</span>
         </div>
+        <div class="flex justify-between border-b pb-2">
+          <span class="text-gray-600">Уникальных farm_id</span>
+          <span id="statFarm" class="font-bold text-gray-800">0</span>
+        </div>
+        <div class="flex justify-between border-b pb-2">
+          <span class="text-gray-600">Уникальных IP</span>
+          <span id="statIp" class="font-bold text-gray-800">0</span>
+        </div>
         <div>
           <h4 class="text-sm font-semibold text-gray-700 mb-2">Устройства</h4>
           <div id="statDevices" class="space-y-1"></div>
@@ -84,6 +104,22 @@
           <h4 class="text-sm font-semibold text-gray-700 mb-2">Операционные системы</h4>
           <div id="statOs" class="space-y-1"></div>
         </div>
+        <div>
+          <h4 class="text-sm font-semibold text-gray-700 mb-2">Модели устройств</h4>
+          <div id="statModels" class="space-y-1"></div>
+        </div>
+        <div>
+          <h4 class="text-sm font-semibold text-gray-700 mb-2">Регионы</h4>
+          <div id="statRegions" class="space-y-1"></div>
+        </div>
+        <div>
+          <h4 class="text-sm font-semibold text-gray-700 mb-2">Последние клики</h4>
+          <div id="statRecentClicks" class="space-y-2 max-h-52 overflow-y-auto"></div>
+        </div>
+        <div>
+          <h4 class="text-sm font-semibold text-gray-700 mb-2">Виртуальные устройства</h4>
+          <div id="statDeviceUniqueness" class="space-y-3"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -91,8 +127,28 @@
   <script>
     const API_URL = '';
 
+    function apiHeaders(extra = {}) {
+      const k = sessionStorage.getItem('apiKey') || '';
+      const h = { ...extra };
+      if (k) h['X-API-Key'] = k;
+      return h;
+    }
+
+    function saveApiKey() {
+      const v = document.getElementById('apiKeyInput').value.trim();
+      if (v) sessionStorage.setItem('apiKey', v);
+      else sessionStorage.removeItem('apiKey');
+      alert(v ? 'Ключ сохранён в этой вкладке' : 'Ключ очищен');
+      loadLinks();
+    }
+
+    (function initApiKeyField() {
+      const el = document.getElementById('apiKeyInput');
+      if (el && sessionStorage.getItem('apiKey')) el.placeholder = '•••• (сохранён)';
+    })();
+
     async function loadLinks() {
-      const res = await fetch(`${API_URL}/api/links`);
+      const res = await fetch(`${API_URL}/api/links`, { headers: apiHeaders() });
       const links = await res.json();
       const tbody = document.getElementById('linksTable');
       if (!links.length) {
@@ -140,11 +196,19 @@
 
     async function showStats(slug) {
       try {
-        const res = await fetch(`${API_URL}/api/links/${slug}/stats`);
-        if (!res.ok) throw new Error('Ошибка загрузки');
-        const data = await res.json();
+        const [statsRes, clicksRes, uniquenessRes] = await Promise.all([
+          fetch(`${API_URL}/api/links/${slug}/stats`, { headers: apiHeaders() }),
+          fetch(`${API_URL}/api/links/${slug}/clicks?limit=10&offset=0`, { headers: apiHeaders() }),
+          fetch(`${API_URL}/api/links/${slug}/device-uniqueness`, { headers: apiHeaders() })
+        ]);
+        if (!statsRes.ok || !clicksRes.ok || !uniquenessRes.ok) throw new Error('Ошибка загрузки');
+        const data = await statsRes.json();
+        const clicksData = await clicksRes.json();
+        const uniquenessData = await uniquenessRes.json();
         document.getElementById('statTotal').textContent = data.total_clicks;
         document.getElementById('statUnique').textContent = data.unique_visitors;
+        document.getElementById('statFarm').textContent = data.unique_farm_devices ?? 0;
+        document.getElementById('statIp').textContent = data.unique_ip_addresses ?? 0;
 
         const devicesDiv = document.getElementById('statDevices');
         const deviceEntries = Object.entries(data.devices).sort((a, b) => b[1] - a[1]);
@@ -166,12 +230,123 @@
               </div>`).join('')
           : '<div class="text-sm text-gray-400">Нет данных</div>';
 
+        const modelsDiv = document.getElementById('statModels');
+        const modelEntries = Object.entries(data.models || {}).sort((a, b) => b[1] - a[1]);
+        modelsDiv.innerHTML = modelEntries.length
+          ? modelEntries.map(([name, count]) => `
+              <div class="flex justify-between text-sm">
+                <span class="text-gray-600">${escapeHtml(name)}</span>
+                <span class="font-medium text-gray-800">${count}</span>
+              </div>`).join('')
+          : '<div class="text-sm text-gray-400">Нет данных</div>';
+
+        const regionsDiv = document.getElementById('statRegions');
+        const regionEntries = Object.entries(data.regions || {}).sort((a, b) => b[1] - a[1]);
+        regionsDiv.innerHTML = regionEntries.length
+          ? regionEntries.map(([name, count]) => `
+              <div class="flex justify-between text-sm">
+                <span class="text-gray-600">${escapeHtml(name)}</span>
+                <span class="font-medium text-gray-800">${count}</span>
+              </div>`).join('')
+          : '<div class="text-sm text-gray-400">Нет данных</div>';
+
+        const recentClicksDiv = document.getElementById('statRecentClicks');
+        const recentItems = clicksData.items || [];
+        recentClicksDiv.innerHTML = recentItems.length
+          ? recentItems.map(item => `
+              <div class="border border-gray-200 rounded-lg px-3 py-2">
+                <div class="text-xs text-gray-500 mb-1">${formatDate(item.created_at)}</div>
+                <div class="text-sm text-gray-700">
+                  <span class="font-medium">${escapeHtml(item.device_model || item.device_family || item.device_type || 'Unknown')}</span>
+                  · ${escapeHtml(item.os || 'Unknown')}
+                </div>
+                <div class="text-xs text-gray-500 mt-1">
+                  farm: ${escapeHtml(item.farm_device_id || '—')} · ${escapeHtml(item.geo_region || item.geo_country || '?')} · ${escapeHtml(maskIp(item.ip_address))}
+                </div>
+              </div>`).join('')
+          : '<div class="text-sm text-gray-400">Нет данных</div>';
+
+        renderDeviceUniqueness(uniquenessData);
+
         const modal = document.getElementById('statsModal');
         modal.classList.remove('hidden');
         modal.classList.add('flex');
       } catch (err) {
         alert('Не удалось загрузить статистику');
       }
+    }
+
+    function renderDeviceUniqueness(data) {
+      const root = document.getElementById('statDeviceUniqueness');
+      const items = data.devices || [];
+      const summary = `
+        <div class="grid grid-cols-2 gap-2 md:grid-cols-4">
+          <div class="rounded-lg bg-gray-50 px-3 py-2">
+            <div class="text-xs text-gray-500">Протестировано</div>
+            <div class="text-lg font-bold text-gray-800">${data.tested_devices ?? 0}</div>
+          </div>
+          <div class="rounded-lg bg-green-50 px-3 py-2">
+            <div class="text-xs text-green-700">Уникальных</div>
+            <div class="text-lg font-bold text-green-800">${data.unique_devices ?? 0}</div>
+          </div>
+          <div class="rounded-lg bg-red-50 px-3 py-2">
+            <div class="text-xs text-red-700">Неуникальных</div>
+            <div class="text-lg font-bold text-red-800">${data.duplicate_devices ?? 0}</div>
+          </div>
+          <div class="rounded-lg bg-amber-50 px-3 py-2">
+            <div class="text-xs text-amber-700">Без farm_id</div>
+            <div class="text-lg font-bold text-amber-800">${data.untagged_clicks ?? 0}</div>
+          </div>
+        </div>`;
+
+      if (!items.length) {
+        root.innerHTML = `${summary}<div class="text-sm text-gray-400">Нет кликов с farm_id</div>`;
+        return;
+      }
+
+      const rows = items.map(item => {
+        const isDuplicate = item.status === 'duplicate';
+        const badgeClass = isDuplicate
+          ? 'bg-red-100 text-red-700'
+          : 'bg-green-100 text-green-700';
+        const badgeText = isDuplicate ? 'Неуникально' : 'Уникально';
+        const geo = [item.geo_country, item.geo_region, item.geo_city].filter(Boolean).join(', ') || 'Unknown';
+        const model = item.device_model || item.device_family || item.device_brand || 'Unknown';
+        const env = `${escapeHtml(model)} / ${escapeHtml(item.os || 'Unknown')} / ${escapeHtml(item.browser_family || 'Unknown')}`;
+        return `
+          <tr class="border-b border-gray-100 align-top">
+            <td class="px-3 py-2 font-mono text-xs text-gray-800">${escapeHtml(item.farm_device_id)}</td>
+            <td class="px-3 py-2">
+              <span class="inline-flex rounded-full px-2 py-1 text-xs font-semibold ${badgeClass}">${badgeText}</span>
+            </td>
+            <td class="px-3 py-2 font-mono text-xs text-gray-700">${escapeHtml(item.ip_address || 'unknown')}</td>
+            <td class="px-3 py-2 text-xs text-gray-700">${escapeHtml(geo)}</td>
+            <td class="px-3 py-2 text-xs text-gray-700">${env}</td>
+            <td class="px-3 py-2 text-xs text-gray-500">${formatDate(item.last_seen_at)}</td>
+            <td class="px-3 py-2 text-xs text-gray-700">${item.click_count ?? 0}</td>
+            <td class="px-3 py-2 font-mono text-xs text-gray-700">${escapeHtml((item.matches || []).join(', ') || '—')}</td>
+          </tr>`;
+      }).join('');
+
+      root.innerHTML = `
+        ${summary}
+        <div class="overflow-x-auto border border-gray-200 rounded-lg">
+          <table class="min-w-full text-left">
+            <thead class="bg-gray-50">
+              <tr>
+                <th class="px-3 py-2 text-xs font-semibold text-gray-500 uppercase">farm_id</th>
+                <th class="px-3 py-2 text-xs font-semibold text-gray-500 uppercase">Статус</th>
+                <th class="px-3 py-2 text-xs font-semibold text-gray-500 uppercase">IP</th>
+                <th class="px-3 py-2 text-xs font-semibold text-gray-500 uppercase">Гео</th>
+                <th class="px-3 py-2 text-xs font-semibold text-gray-500 uppercase">Модель / ОС / браузер</th>
+                <th class="px-3 py-2 text-xs font-semibold text-gray-500 uppercase">Последний переход</th>
+                <th class="px-3 py-2 text-xs font-semibold text-gray-500 uppercase">Кликов</th>
+                <th class="px-3 py-2 text-xs font-semibold text-gray-500 uppercase">Совпадает с</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>`;
     }
 
     function closeStats() {
@@ -183,7 +358,7 @@
     async function resetClicks(slug) {
       if (!confirm('Сбросить счетчик кликов до 0?')) return;
       try {
-        const res = await fetch(`${API_URL}/api/links/${slug}/reset`, { method: 'POST' });
+        const res = await fetch(`${API_URL}/api/links/${slug}/reset`, { method: 'POST', headers: apiHeaders() });
         if (!res.ok) throw new Error('Ошибка сброса');
         loadLinks();
       } catch (err) {
@@ -194,7 +369,7 @@
     async function deleteLink(slug) {
       if (!confirm('Удалить эту ссылку?')) return;
       try {
-        const res = await fetch(`${API_URL}/api/links/${slug}`, { method: 'DELETE' });
+        const res = await fetch(`${API_URL}/api/links/${slug}`, { method: 'DELETE', headers: apiHeaders() });
         if (!res.ok) throw new Error('Ошибка удаления');
         loadLinks();
       } catch (err) {
@@ -204,8 +379,26 @@
 
     function escapeHtml(text) {
       const div = document.createElement('div');
-      div.textContent = text;
+      div.textContent = text ?? '';
       return div.innerHTML;
+    }
+
+    function maskIp(ip) {
+      if (!ip) return 'unknown ip';
+      if (ip.includes(':')) {
+        const parts = ip.split(':');
+        return `${parts.slice(0, 3).join(':')}:****`;
+      }
+      const parts = ip.split('.');
+      if (parts.length !== 4) return ip;
+      return `${parts[0]}.${parts[1]}.${parts[2]}.***`;
+    }
+
+    function formatDate(value) {
+      if (!value) return 'unknown time';
+      const d = new Date(value);
+      if (Number.isNaN(d.getTime())) return value;
+      return d.toLocaleString('ru-RU');
     }
 
     document.getElementById('createForm').addEventListener('submit', async (e) => {
@@ -215,7 +408,7 @@
       try {
         const res = await fetch(`${API_URL}/api/links`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: apiHeaders({ 'Content-Type': 'application/json' }),
           body: JSON.stringify({ label })
         });
         if (!res.ok) throw new Error('Ошибка создания');
