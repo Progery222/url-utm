@@ -1,0 +1,7 @@
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+# Shell form so $PORT is expanded (raw uvicorn --port $PORT breaks in Docker runtime)
+startCommand = "sh -c 'alembic upgrade head && exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}'"
