@@ -3,6 +3,7 @@ import hmac
 import ipaddress
 import json
 import os
+from urllib.parse import quote
 import secrets
 import uuid
 from datetime import datetime, timezone
@@ -10,7 +11,7 @@ from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import func
@@ -341,6 +342,86 @@ def list_links():
         db.close()
 
 
+def _link_stats_dict(db, link: Link) -> dict:
+    total = db.query(func.count(Click.id)).filter(Click.link_id == link.id).scalar() or 0
+    unique = db.query(func.count(func.distinct(Click.visitor_id))).filter(Click.link_id == link.id).scalar() or 0
+    devices = db.query(Click.device_type, func.count(Click.id)).filter(Click.link_id == link.id).group_by(Click.device_type).all()
+    os_stats = db.query(Click.os, func.count(Click.id)).filter(Click.link_id == link.id).group_by(Click.os).all()
+    model_stats = (
+        db.query(Click.device_model, func.count(Click.id))
+        .filter(Click.link_id == link.id)
+        .group_by(Click.device_model)
+        .all()
+    )
+    region_stats = (
+        db.query(Click.geo_region, func.count(Click.id))
+        .filter(Click.link_id == link.id)
+        .group_by(Click.geo_region)
+        .all()
+    )
+    unique_farm_devices = (
+        db.query(func.count(func.distinct(Click.farm_device_id)))
+        .filter(
+            Click.link_id == link.id,
+            Click.farm_device_id.isnot(None),
+            Click.farm_device_id != "",
+        )
+        .scalar()
+        or 0
+    )
+    unique_ip_addresses = (
+        db.query(func.count(func.distinct(Click.ip_address)))
+        .filter(Click.link_id == link.id, Click.ip_address.isnot(None))
+        .scalar()
+        or 0
+    )
+    return {
+        "total_clicks": total,
+        "unique_visitors": unique,
+        "unique_farm_devices": unique_farm_devices,
+        "unique_ip_addresses": unique_ip_addresses,
+        "devices": {d or "Unknown": c for d, c in devices},
+        "os": {o or "Unknown": c for o, c in os_stats},
+        "models": {m or "Unknown": c for m, c in model_stats},
+        "regions": {r or "Unknown": c for r, c in region_stats},
+    }
+
+
+def _click_export_dict(click: Click) -> dict:
+    return {
+        "id": click.id,
+        "visitor_id": click.visitor_id,
+        "ip_address": click.ip_address,
+        "user_agent": click.user_agent,
+        "device_type": click.device_type,
+        "os": click.os,
+        "device_family": click.device_family,
+        "device_brand": click.device_brand,
+        "device_model": click.device_model,
+        "browser_family": click.browser_family,
+        "geo_country": click.geo_country,
+        "geo_region": click.geo_region,
+        "geo_city": click.geo_city,
+        "farm_device_id": click.farm_device_id,
+        "created_at": click.created_at.isoformat() if click.created_at else None,
+    }
+
+
+def _attribution_export_dict(item: DeviceAttribution) -> dict:
+    return {
+        "id": item.id,
+        "visitor_id": item.visitor_id,
+        "token": item.token,
+        "source": item.source,
+        "imei_hash": item.imei_hash,
+        "serial_hash": item.serial_hash,
+        "device_identifier_hash": item.device_identifier_hash,
+        "farm_device_id": item.farm_device_id,
+        "raw_payload": item.raw_payload,
+        "created_at": item.created_at.isoformat() if item.created_at else None,
+    }
+
+
 @app.get("/api/links/{slug}/stats")
 def link_stats(slug: str):
     db = SessionLocal()
@@ -348,48 +429,63 @@ def link_stats(slug: str):
         link = db.query(Link).filter(Link.slug == slug).first()
         if not link:
             raise HTTPException(status_code=404, detail="Link not found")
-        total = db.query(func.count(Click.id)).filter(Click.link_id == link.id).scalar() or 0
-        unique = db.query(func.count(func.distinct(Click.visitor_id))).filter(Click.link_id == link.id).scalar() or 0
-        devices = db.query(Click.device_type, func.count(Click.id)).filter(Click.link_id == link.id).group_by(Click.device_type).all()
-        os_stats = db.query(Click.os, func.count(Click.id)).filter(Click.link_id == link.id).group_by(Click.os).all()
-        model_stats = (
-            db.query(Click.device_model, func.count(Click.id))
-            .filter(Click.link_id == link.id)
-            .group_by(Click.device_model)
+        return _link_stats_dict(db, link)
+    finally:
+        db.close()
+
+
+@app.get("/api/links/{slug}/export")
+def export_link_analytics(slug: str):
+    """Полная выгрузка аналитики по ссылке (JSON для внешнего анализа, в т.ч. ИИ)."""
+    db = SessionLocal()
+    try:
+        link = db.query(Link).filter(Link.slug == slug).first()
+        if not link:
+            raise HTTPException(status_code=404, detail="Link not found")
+
+        clicks_q = db.query(Click).filter(Click.link_id == link.id).order_by(Click.id.asc())
+        clicks = clicks_q.all()
+        stats = _link_stats_dict(db, link)
+        device_uniqueness = build_device_uniqueness_report(clicks)
+        clicks_data = [_click_export_dict(c) for c in clicks]
+
+        attributions = (
+            db.query(DeviceAttribution)
+            .filter(DeviceAttribution.link_id == link.id)
+            .order_by(DeviceAttribution.id.asc())
             .all()
         )
-        region_stats = (
-            db.query(Click.geo_region, func.count(Click.id))
-            .filter(Click.link_id == link.id)
-            .group_by(Click.geo_region)
-            .all()
-        )
-        unique_farm_devices = (
-            db.query(func.count(func.distinct(Click.farm_device_id)))
-            .filter(
-                Click.link_id == link.id,
-                Click.farm_device_id.isnot(None),
-                Click.farm_device_id != "",
-            )
-            .scalar()
-            or 0
-        )
-        unique_ip_addresses = (
-            db.query(func.count(func.distinct(Click.ip_address)))
-            .filter(Click.link_id == link.id, Click.ip_address.isnot(None))
-            .scalar()
-            or 0
-        )
-        return {
-            "total_clicks": total,
-            "unique_visitors": unique,
-            "unique_farm_devices": unique_farm_devices,
-            "unique_ip_addresses": unique_ip_addresses,
-            "devices": {d or "Unknown": c for d, c in devices},
-            "os": {o or "Unknown": c for o, c in os_stats},
-            "models": {m or "Unknown": c for m, c in model_stats},
-            "regions": {r or "Unknown": c for r, c in region_stats},
+        attributions_data = [_attribution_export_dict(a) for a in attributions]
+
+        exported_at = datetime.now(tz=timezone.utc).isoformat()
+        payload = {
+            "export_version": 1,
+            "exported_at": exported_at,
+            "link": {
+                "id": link.id,
+                "slug": link.slug,
+                "label": link.label,
+                "target_url": link.target_url,
+            },
+            "stats": stats,
+            "device_uniqueness": device_uniqueness,
+            "clicks": clicks_data,
+            "device_attributions": attributions_data,
+            "counts": {
+                "clicks": len(clicks_data),
+                "device_attributions": len(attributions_data),
+            },
         }
+
+        body = json.dumps(payload, ensure_ascii=False, indent=2)
+        filename = f"url-tracker-{slug}-analytics.json"
+        content_disp = f'attachment; filename="{filename}"; filename*=UTF-8\'\'{quote(filename)}'
+
+        return Response(
+            content=body.encode("utf-8"),
+            media_type="application/json; charset=utf-8",
+            headers={"Content-Disposition": content_disp},
+        )
     finally:
         db.close()
 

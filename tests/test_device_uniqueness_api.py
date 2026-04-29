@@ -88,3 +88,45 @@ def test_device_uniqueness_endpoint_returns_summary_devices_and_duplicate_groups
     assert body["devices"][0]["status"] == "duplicate"
     assert body["devices"][0]["matches"] == ["device_02"]
     assert body["duplicate_groups"][0]["farm_device_ids"] == ["device_01", "device_02"]
+
+
+def test_export_analytics_json(tmp_path):
+    main = load_app(tmp_path)
+    main.Base.metadata.create_all(bind=main.engine)
+    client = TestClient(main.app)
+
+    with main.SessionLocal() as db:
+        link = main.Link(slug="export01", target_url="https://example.com", label="Export test")
+        db.add(link)
+        db.commit()
+        db.refresh(link)
+        db.add(
+            main.Click(
+                link_id=link.id,
+                visitor_id="v1",
+                farm_device_id="dev_a",
+                ip_address="198.51.100.1",
+                user_agent="TestAgent/1",
+                os="Android",
+                device_model="Pixel",
+                geo_region="TestRegion",
+            )
+        )
+        db.commit()
+
+    response = client.get("/api/links/export01/export")
+
+    assert response.status_code == 200
+    assert response.headers.get("content-type", "").startswith("application/json")
+    assert "attachment" in (response.headers.get("content-disposition") or "").lower()
+
+    data = response.json()
+    assert data["export_version"] == 1
+    assert data["link"]["slug"] == "export01"
+    assert data["link"]["label"] == "Export test"
+    assert data["counts"]["clicks"] == 1
+    assert len(data["clicks"]) == 1
+    assert data["clicks"][0]["farm_device_id"] == "dev_a"
+    assert data["clicks"][0]["user_agent"] == "TestAgent/1"
+    assert data["device_uniqueness"]["tested_devices"] == 1
+    assert data["stats"]["total_clicks"] == 1
